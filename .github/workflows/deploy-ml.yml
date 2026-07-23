@@ -1,0 +1,23 @@
+name: Deploy ML
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "data-science/**"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, demo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simular despliegue del servicio de ML
+        shell: bash
+        run: |
+          echo "🚀 Desplegando DATA-SCIENCE"
+          echo "Rama: ${{ github.ref_name }}"
+          echo "Version: $(cat data-science/version.txt)"
+          sleep 5
+          echo "$(date '+%Y-%m-%d %H:%M:%S') | data-science | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
+          echo "✅ Data-science desplegado"

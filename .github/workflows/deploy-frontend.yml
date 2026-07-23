@@ -1,0 +1,23 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, demo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simular despliegue del frontend
+        shell: bash
+        run: |
+          echo "🚀 Desplegando FRONTEND"
+          echo "Rama: ${{ github.ref_name }}"
+          echo "Version: $(cat frontend/version.txt)"
+          sleep 5
+          echo "$(date '+%Y-%m-%d %H:%M:%S') | frontend | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
+          echo "✅ Frontend desplegado"

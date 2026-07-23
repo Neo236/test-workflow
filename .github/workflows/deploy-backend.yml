@@ -1,0 +1,23 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, demo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simular despliegue del backend
+        shell: bash
+        run: |
+          echo "🚀 Desplegando BACKEND"
+          echo "Rama: ${{ github.ref_name }}"
+          echo "Version: $(cat backend/version.txt)"
+          sleep 5
+          echo "$(date '+%Y-%m-%d %H:%M:%S') | backend | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
+          echo "✅ Backend desplegado"

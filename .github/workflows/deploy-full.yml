@@ -1,0 +1,22 @@
+name: Deploy Completo
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "docker-compose.yml"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, demo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simular despliegue completo
+        shell: bash
+        run: |
+          echo "🚀 Desplegando TODOS los servicios (cambió docker-compose.yml)"
+          echo "Rama: ${{ github.ref_name }}"
+          sleep 8
+          echo "$(date '+%Y-%m-%d %H:%M:%S') | full-stack | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
+          echo "✅ Stack completo desplegado"
