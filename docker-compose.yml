@@ -1,0 +1,5 @@
+# Compose de mentira, solo para la demo de paths.
+# Editar este archivo dispara el workflow "Deploy Completo".
+services:
+  demo:
+    image: alpine
