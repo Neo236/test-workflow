@@ -1,11 +1,13 @@
 # Deploy ML — FastAPI (Python 3.10)
-# Se dispara SOLO con merges a main que modifican data-science/**.
+# Se dispara con merges que modifican data-science/**:
+#   push a main    → PRODUCCIÓN (docker compose -p energiai-prod)
+#   push a develop → STAGING    (docker compose -p energiai-staging)
 # Corre en el runner self-hosted de la VM de OCI (label: oci).
 name: Deploy ML
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "data-science/**"
 
@@ -19,24 +21,27 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, oci]
-    # TODO (opcional): environment: production
+    env:
+      DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Re-desplegar ml-service
         run: |
-          echo "🚀 Desplegando ml-service | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
+          echo "🚀 Desplegando ml-service | entorno: $DEPLOY_ENV | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
           # TODO: bloqueado hasta el merge de la rama `data`: el Dockerfile hace
           # COPY requirements.txt pero data-science/ en develop no lo tiene,
           # así que el build falla hoy. python:3.10-slim sí es multi-arch (arm64 OK).
           # El comando final será:
-          #   docker compose up -d --build ml-service
-          echo "PLACEHOLDER: docker compose up -d --build ml-service"
+          #   docker compose -p energiai-$DEPLOY_ENV --env-file .env.$DEPLOY_ENV up -d --build ml-service
+          echo "PLACEHOLDER: docker compose -p energiai-$DEPLOY_ENV up -d --build ml-service"
 
       - name: Verificar salud del servicio
         run: |
           # El Dockerfile del servicio ML ya define un healthcheck en /health.
+          # Puerto según compose parametrizado: 8000 (prod) / 8001 (staging).
           # TODO: habilitar cuando el servicio esté desplegado.
+          #   PORT=$([ "$DEPLOY_ENV" = "prod" ] && echo 8000 || echo 8001)
           #   sleep 10
-          #   curl --fail --retry 5 --retry-delay 5 http://localhost:8000/health
-          echo "PLACEHOLDER: curl http://localhost:8000/health"
+          #   curl --fail --retry 5 --retry-delay 5 http://localhost:$PORT/health
+          echo "PLACEHOLDER: curl http://localhost:<puerto-$DEPLOY_ENV>/health"

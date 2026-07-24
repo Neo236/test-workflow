@@ -8,9 +8,9 @@
 #   1. Un cambio que solo toca docs/ no dispara ningún workflow.
 #   2. Un PR que toca backend/** dispara SOLO "CI Backend" (build + tests
 #      reales con ./mvnw -B verify en el runner `ci` del servidor local).
-#   3. Mergear a develop NO despliega nada (los deploys solo escuchan main).
-#   4. Promover develop→main dispara SOLO el deploy del componente que cambió,
-#      en el runner `oci` de la VM de OCI.
+#   3. Mergear a develop despliega STAGING en la VM (nunca producción).
+#   4. Promover develop→main despliega PRODUCCIÓN — solo el componente que
+#      cambió, en el runner `oci` de la VM de OCI.
 #   5. (opcional) data-science/** tiene su propio carril: CI ML → Deploy ML.
 #   6. (opcional) Gotcha: un PR con conflictos no dispara NINGÚN workflow.
 #
@@ -126,28 +126,27 @@ ok "CI Backend en verde en el servidor local. ci-ml en silencio (filtro de paths
 pausa
 
 # =============================================================================
-titulo "PRUEBA 3 — Mergear a develop NO despliega nada"
-explica "Los deploy-* solo escuchan push a main. develop integra sin desplegar:"
-explica "así el equipo puede acumular cambios sin tocar producción."
+titulo "PRUEBA 3 — Mergear a develop despliega STAGING (nunca producción)"
+explica "develop alimenta el ambiente de staging: misma VM, proyecto compose"
+explica "separado (energiai-staging). Producción solo se toca desde main."
 pausa
 PREV="$(ultima_run)"
 run gh pr merge -R "$REPO" "feature/demo-backend-$TS" --merge --delete-branch
-explica "Esperando 20 s para confirmar que no hay deploys..."
-sleep 20
-if [ "$(ultima_run)" = "$PREV" ]; then
-  ok "Ningún deploy tras el merge a develop."
-else
-  echo "⚠ Apareció una run inesperada — revisar la pestaña Actions."
-fi
+explica "Esperando el deploy de staging disparado por el push a develop..."
+DEPLOY_ID="$(espera_nueva_run "$PREV")"
+[ -n "$DEPLOY_ID" ] || { echo "✖ No apareció el deploy de staging"; exit 1; }
+run gh run watch -R "$REPO" "$DEPLOY_ID" --exit-status
+muestra_job "$DEPLOY_ID"
+ok "Deploy Backend en STAGING, dentro de la VM. Producción (main) intacta."
 run git checkout -q develop
 run git pull -q
 pausa
 
 # =============================================================================
-titulo "PRUEBA 4 — Promoción develop→main: deploy selectivo en la VM"
+titulo "PRUEBA 4 — Promoción develop→main: deploy selectivo a PRODUCCIÓN"
 explica "Al abrir el PR, el CI corre de nuevo (también protege a main)."
-explica "Al mergearlo, el push a main dispara SOLO Deploy Backend — que corre"
-explica "en el runner 'oci' DENTRO de la VM de OCI. deploy-ml y deploy-full, en silencio."
+explica "Al mergearlo, el push a main dispara SOLO Deploy Backend con entorno"
+explica "prod, en el runner 'oci' de la VM. deploy-ml y deploy-full, en silencio."
 pausa
 PREV="$(ultima_run)"
 run gh pr create -R "$REPO" --base main --head develop \
@@ -168,8 +167,8 @@ DEPLOY_ID="$(espera_nueva_run "$PREV")"
 [ -n "$DEPLOY_ID" ] || { echo "✖ No apareció el deploy"; exit 1; }
 run gh run watch -R "$REPO" "$DEPLOY_ID" --exit-status
 muestra_job "$DEPLOY_ID"
-ok "Deploy Backend ejecutado por energiai-oci-01 (VM OCI, ARM64)."
-ok "Circuito completo: feature → PR+CI → develop → PR+CI → main → deploy selectivo."
+ok "Deploy Backend (entorno prod) ejecutado por energiai-oci-01 (VM OCI, ARM64)."
+ok "Circuito completo: feature → PR+CI → develop (staging) → PR+CI → main (prod)."
 pausa
 
 # =============================================================================
@@ -191,7 +190,14 @@ if [[ "${R5,,}" == "s" ]]; then
   run gh run watch -R "$REPO" "$RUN_ID" --exit-status
   muestra_job "$RUN_ID"
   ok "CI ML corrió (hoy con placeholders, igual que en el plan oficial). CI Backend en silencio."
+  PREV="$(ultima_run)"
   run gh pr merge -R "$REPO" "feature/demo-ml-$TS" --merge --delete-branch
+  explica "El merge a develop despliega el ML en STAGING..."
+  DEPLOY_ID="$(espera_nueva_run "$PREV")"
+  if [ -n "$DEPLOY_ID" ]; then
+    run gh run watch -R "$REPO" "$DEPLOY_ID" --exit-status
+    muestra_job "$DEPLOY_ID"
+  fi
   pausa
   PREV="$(ultima_run)"
   run gh pr create -R "$REPO" --base main --head develop \
@@ -204,7 +210,7 @@ if [[ "${R5,,}" == "s" ]]; then
   [ -n "$DEPLOY_ID" ] || { echo "✖ No apareció el deploy de ML"; exit 1; }
   run gh run watch -R "$REPO" "$DEPLOY_ID" --exit-status
   muestra_job "$DEPLOY_ID"
-  ok "Deploy ML en la VM. El backend no se re-desplegó: cada sector viaja solo."
+  ok "Deploy ML en PRODUCCIÓN. El backend no se re-desplegó: cada sector viaja solo."
   pausa
 fi
 
@@ -230,10 +236,14 @@ if [[ "${R6,,}" == "s" ]]; then
   explica "Paso B: el mismo archivo, editado distinto en develop..."
   run git checkout -q develop
   run git pull -q
+  PREV="$(ultima_run)"
   echo "conflicto-develop-$TS" > backend/version.txt
   run git add backend/version.txt
   run git commit -q -m "feat(backend): edición en develop (demo conflicto $TS)"
   run git push -q origin develop
+  explica "(Este push a develop dispara su deploy de staging; lo dejamos terminar...)"
+  DEPLOY_ID="$(espera_nueva_run "$PREV")"
+  if [ -n "$DEPLOY_ID" ]; then run gh run watch -R "$REPO" "$DEPLOY_ID" --exit-status; fi
   pausa
   explica "Paso C: PR develop→main... que nace en conflicto."
   PREV="$(ultima_run)"
@@ -257,9 +267,11 @@ if [[ "${R6,,}" == "s" ]]; then
   run git commit -q -m "merge: resolver conflicto de demo $TS"
   run git push -q origin develop
   RUN_ID="$(espera_nueva_run "$PREV")"
-  [ -n "$RUN_ID" ] || { echo "✖ El CI no revivió"; exit 1; }
+  [ -n "$RUN_ID" ] || { echo "✖ No se disparó nada tras resolver"; exit 1; }
+  explica "(El push dispara DOS runs: el CI del PR revivido y el deploy de staging.)"
   run gh run watch -R "$REPO" "$RUN_ID" --exit-status
-  ok "Resuelto el conflicto, el push (evento synchronize) disparó el CI normalmente."
+  run gh run list -R "$REPO" --limit 2
+  ok "Resuelto el conflicto, el CI del PR revivió (evento synchronize)."
   PREV="$(ultima_run)"
   run gh pr merge -R "$REPO" develop --merge
   DEPLOY_ID="$(espera_nueva_run "$PREV")"
@@ -273,8 +285,9 @@ titulo "Fin de la demo"
 explica "Quedó demostrado:"
 explica "  • Filtros de paths: docs no dispara nada; cada sector, solo su carril."
 explica "  • CI real (build + tests) en el runner del servidor local, con caché."
-explica "  • develop integra sin desplegar; main despliega solo lo que cambió."
-explica "  • El deploy corre en el runner de la VM de OCI (nunca código de PRs)."
+explica "  • develop despliega staging; main despliega producción — en paralelo,"
+explica "    misma VM, proyectos compose separados, y solo lo que cambió."
+explica "  • Los deploys corren en el runner de la VM de OCI (nunca código de PRs)."
 explica "  • Gotcha documentado: PR con conflictos = CI en silencio."
 explica ""
 explica "Para el repo oficial: mismos workflows, mismos runners; solo cambia la"

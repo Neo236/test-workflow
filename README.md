@@ -19,9 +19,9 @@ al registrar los runners.
 |--------|----------|--------|
 | PR a `develop`/`main` que toca `backend/**` | `ci-backend` — **`./mvnw -B verify` real** (el backend Spring Boot es copia del repo oficial) | `ci` |
 | PR a `develop`/`main` que toca `data-science/**` | `ci-ml` (placeholders, igual que el oficial hoy) | `ci` |
-| Merge a `main` que toca `backend/**` | `deploy-backend` | `oci` |
-| Merge a `main` que toca `data-science/**` | `deploy-ml` | `oci` |
-| Merge a `main` que toca `docker-compose.yml` | `deploy-full` | `oci` |
+| Merge a `develop` (→ **staging**) o `main` (→ **prod**) que toca `backend/**` | `deploy-backend` | `oci` |
+| Merge a `develop`/`main` que toca `data-science/**` | `deploy-ml` | `oci` |
+| Merge a `develop`/`main` que toca `docker-compose.yml` | `deploy-full` | `oci` |
 | Solo `docs/**` / `README.md` | ninguno | — |
 
 Los `deploy-*` mantienen los pasos placeholder del template oficial (los comandos
@@ -30,8 +30,10 @@ documentados en la propuesta de CI/CD).
 
 ## Flujo de ramas
 
-`feature/*` → PR → `develop` → PR → `main`. Los deploys solo se disparan con push
-a `main` (nunca desde PRs): código de PRs jamás corre en el runner de la VM.
+`feature/*` → PR → `develop` (→ despliega **staging**) → PR → `main` (→ despliega
+**producción**). Los deploys nunca se disparan desde PRs: código de PRs jamás corre
+en el runner de la VM. Ambos ambientes conviven en la VM como proyectos compose
+separados (`energiai-staging` / `energiai-prod`), cada uno con su `.env` y puertos.
 
 ## Demo guiada paso a paso
 
