@@ -33,6 +33,18 @@ documentados en la propuesta de CI/CD).
 `feature/*` → PR → `develop` → PR → `main`. Los deploys solo se disparan con push
 a `main` (nunca desde PRs): código de PRs jamás corre en el runner de la VM.
 
+## Demo guiada paso a paso
+
+`demo/demo-pipeline.sh` recorre cada propiedad del pipeline pausando con **Enter**
+entre pruebas (pensado para mostrarlo en vivo): filtros de `paths`, CI real en el
+runner `ci`, integración a `develop` sin deploy, deploy selectivo en el runner
+`oci` de la VM, carril propio de ML (opcional) y el gotcha de PRs con conflicto
+(opcional). Requiere `gh` autenticado con push al repo:
+
+```bash
+bash demo/demo-pipeline.sh
+```
+
 ## Diferencias deliberadas con el oficial
 
 - El backend acá está commiteado con `mvnw` **con** bit de ejecución (el fix
