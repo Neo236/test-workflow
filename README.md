@@ -1,78 +1,41 @@
-# 🧪 Demo — CI/CD con runner self-hosted
+# 🧪 test-workflow — Réplica del pipeline CI/CD de EnergiAI
 
-Repo de demostración para el equipo de **EnergiAI**. Muestra cómo un runner de
-GitHub instalado en nuestra máquina (en el proyecto real: la VM de OCI)
-despliega automáticamente **solo el componente que cambió** en cada merge a
-`main` o `develop`.
+Repo de práctica de [@Neo236](https://github.com/Neo236) que replica **1:1** el pipeline
+CI/CD propuesto para [`No-Country-simulation/G9-LATAM-TEAM-09`](https://github.com/No-Country-simulation/G9-LATAM-TEAM-09)
+(propuesta "CI/CD por Sector, runners self-hosted", julio 2026). Mismos workflows,
+mismos nombres de runner, mismas etiquetas: lo único que cambia es la URL del repo
+al registrar los runners.
 
-## La idea en 30 segundos
+## Runners (idénticos al plan oficial)
 
-- Hay 4 workflows en `.github/workflows/`, uno por componente:
+| Runner | Máquina | Label | Corre |
+|--------|---------|-------|-------|
+| `energiai-ci-01` | Servidor local del equipo (Debian x64) | `ci` | CI de los PRs: build + tests |
+| `energiai-oci-01` | VM OCI `energiai-app-01` (Ubuntu 24.04 ARM64) | `oci` | CD: deploys al mergear a `main` |
 
-| Workflow | Se dispara cuando cambia... |
-|---|---|
-| `deploy-backend.yml` | `backend/**` |
-| `deploy-frontend.yml` | `frontend/**` |
-| `deploy-ml.yml` | `data-science/**` |
-| `deploy-full.yml` | `docker-compose.yml` |
+## Workflows
 
-- Un push que solo toca `docs/` o este README **no dispara nada**.
-- Los workflows corren en un **runner self-hosted**: un agente instalado en
-  nuestra máquina que ejecuta los comandos localmente. En el proyecto real,
-  ese agente vive en la VM de OCI y el paso simulado se reemplaza por
-  `docker compose up -d --build <servicio>`.
+| Evento | Workflow | Runner |
+|--------|----------|--------|
+| PR a `develop`/`main` que toca `backend/**` | `ci-backend` — **`./mvnw -B verify` real** (el backend Spring Boot es copia del repo oficial) | `ci` |
+| PR a `develop`/`main` que toca `data-science/**` | `ci-ml` (placeholders, igual que el oficial hoy) | `ci` |
+| Merge a `main` que toca `backend/**` | `deploy-backend` | `oci` |
+| Merge a `main` que toca `data-science/**` | `deploy-ml` | `oci` |
+| Merge a `main` que toca `docker-compose.yml` | `deploy-full` | `oci` |
+| Solo `docs/**` / `README.md` | ninguno | — |
 
-## Preparar la demo (una sola vez, ~5 min)
+Los `deploy-*` mantienen los pasos placeholder del template oficial (los comandos
+`docker compose` reales quedan bloqueados por pendientes del repo oficial,
+documentados en la propuesta de CI/CD).
 
-1. En este repo: **Settings → Actions → Runners → New self-hosted runner**.
-2. Elegir el OS de tu máquina y seguir los comandos que muestra GitHub
-   (descargar, `./config.sh` con el token, `./run.sh`).
-3. Cuando pregunte por **labels**, agregar `demo` (los workflows usan
-   `runs-on: [self-hosted, demo]`).
-4. Dejar la terminal con `./run.sh` corriendo y visible: ahí se ve al runner
-   trabajar en vivo.
+## Flujo de ramas
 
-## Guion de la demo
+`feature/*` → PR → `develop` → PR → `main`. Los deploys solo se disparan con push
+a `main` (nunca desde PRs): código de PRs jamás corre en el runner de la VM.
 
-Con la pestaña **Actions** del repo abierta en el navegador y la terminal del
-runner al lado:
+## Diferencias deliberadas con el oficial
 
-1. **Cambio en backend** (en rama `develop`):
-   ```bash
-   echo "backend v2" > backend/version.txt
-   git add . && git commit -m "cambio en backend" && git push
-   ```
-   → Se dispara **solo** `Deploy Backend`. Verlo correr en la terminal.
-
-2. **Cambio en docs**:
-   ```bash
-   echo "mas notas" >> docs/notas.md
-   git add . && git commit -m "solo docs" && git push
-   ```
-   → **No se dispara nada.** Este es el punto clave del filtro `paths`.
-
-3. **Cambio en frontend y en data-science juntos**:
-   → Se disparan **los dos** workflows, cada uno con su componente.
-
-4. **Merge de develop a main**:
-   → El mismo workflow corre de nuevo, ahora con `Rama: main`. En el
-   proyecto real, acá se elegiría el entorno (prod vs staging) según
-   `github.ref_name`.
-
-5. Mostrar el historial de "despliegues" acumulado en la máquina:
-   ```bash
-   cat ~/demo-deploys.log
-   ```
-
-## Qué cambia en el proyecto real
-
-| Demo | Real |
-|---|---|
-| Runner en mi PC | Runner en la VM de OCI (binario ARM64) |
-| `echo` + `sleep` | `docker compose up -d --build <servicio>` |
-| `~/demo-deploys.log` | Los contenedores actualizados corriendo |
-| Label `demo` | Label `oci` |
-
-**Nota de seguridad para el repo real (público):** en Settings → Actions,
-verificar que los workflows de PRs de forks requieran aprobación antes de
-correr, para que código ajeno nunca se ejecute en nuestra VM.
+- El backend acá está commiteado con `mvnw` **con** bit de ejecución (el fix
+  definitivo); el workflow conserva el `chmod +x` defensivo del template.
+- Sin revisión de PR obligatoria (repo de una sola persona); el oficial exige
+  1 aprobación.

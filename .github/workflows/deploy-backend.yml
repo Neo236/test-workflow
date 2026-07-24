@@ -1,23 +1,52 @@
+# Deploy Backend — Spring Boot (Java 17)
+# Se dispara SOLO con merges a main que modifican backend/**.
+# Corre en el runner self-hosted de la VM de OCI (label: oci).
+# Nunca se dispara desde pull_request: código de PRs no se ejecuta
+# en nuestra infraestructura de producción.
 name: Deploy Backend
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
+    # Fase 2 (staging): agregar develop a la lista de branches y
+    # seleccionar el entorno según github.ref_name.
     paths:
       - "backend/**"
 
+permissions:
+  contents: read
+
+# Evita dos deploys simultáneos del mismo servicio si se encadenan merges.
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    runs-on: [self-hosted, demo]
+    runs-on: [self-hosted, oci]
+    # TODO (opcional): environment: production
     steps:
       - uses: actions/checkout@v4
 
-      - name: Simular despliegue del backend
-        shell: bash
+      - name: Re-desplegar backend
         run: |
-          echo "🚀 Desplegando BACKEND"
-          echo "Rama: ${{ github.ref_name }}"
-          echo "Version: $(cat backend/version.txt)"
-          sleep 5
-          echo "$(date '+%Y-%m-%d %H:%M:%S') | backend | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
-          echo "✅ Backend desplegado"
+          echo "🚀 Desplegando backend | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
+          # TODO: bloqueado por tres pendientes del repo (validar en la VM ARM64):
+          #   1. mvnw sin bit de ejecución → el RUN ./mvnw del Dockerfile falla
+          #      en un clone fresco. Fix: git update-index --chmod=+x .../mvnw
+          #   2. maven:3.9.6-eclipse-temurin-17-alpine (builder) no publica arm64.
+          #   3. eclipse-temurin:17-jre-alpine (runtime) no publica arm64.
+          #      Alternativa multi-arch: maven:3.9-eclipse-temurin-17 y
+          #      eclipse-temurin:17-jre (base Ubuntu).
+          # El comando final será:
+          #   docker compose up -d --build backend
+          echo "PLACEHOLDER: docker compose up -d --build backend"
+
+      - name: Verificar salud del servicio
+        run: |
+          # TODO: habilitar cuando el backend exponga /actuator/health
+          # (requiere spring-boot-starter-actuator en el pom.xml — al 24/07
+          # sigue sin estar, aunque el HEALTHCHECK del Dockerfile ya lo consulta).
+          #   sleep 20
+          #   curl --fail --retry 5 --retry-delay 5 http://localhost:8080/actuator/health
+          echo "PLACEHOLDER: curl http://localhost:8080/actuator/health"
