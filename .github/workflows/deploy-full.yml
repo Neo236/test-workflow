@@ -1,22 +1,42 @@
+# Deploy Completo — Stack EnergiAI
+# Se dispara SOLO con merges a main que modifican docker-compose.yml
+# (cambios de orquestación afectan a todos los servicios).
 name: Deploy Completo
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "docker-compose.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-full-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    runs-on: [self-hosted, demo]
+    runs-on: [self-hosted, oci]
+    # TODO (opcional): environment: production
     steps:
       - uses: actions/checkout@v4
 
-      - name: Simular despliegue completo
-        shell: bash
+      - name: Re-desplegar stack completo
         run: |
-          echo "🚀 Desplegando TODOS los servicios (cambió docker-compose.yml)"
-          echo "Rama: ${{ github.ref_name }}"
-          sleep 8
-          echo "$(date '+%Y-%m-%d %H:%M:%S') | full-stack | rama: ${{ github.ref_name }} | ${{ github.sha }}" >> ~/demo-deploys.log
-          echo "✅ Stack completo desplegado"
+          echo "🚀 Desplegando stack completo | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
+          # TODO: bloqueado por los mismos pendientes que deploy-backend.yml
+          # (mvnw sin +x, imágenes Alpine sin arm64) y deploy-ml.yml
+          # (requirements.txt ausente hasta mergear la rama `data`).
+          # El comando final será:
+          #   docker compose up -d --build
+          echo "PLACEHOLDER: docker compose up -d --build"
+
+      - name: Verificar salud del stack
+        run: |
+          # TODO: habilitar junto con los healthchecks individuales.
+          #   docker compose ps
+          #   curl --fail http://localhost:8000/health
+          #   curl --fail http://localhost:8080/actuator/health
+          echo "PLACEHOLDER: docker compose ps + healthchecks"
