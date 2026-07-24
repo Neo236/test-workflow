@@ -34,6 +34,17 @@ explica() { echo "${C_TXT}$*${C_RST}"; }
 ok()      { echo "${C_OK}✔ $*${C_RST}"; }
 pausa()   { echo; read -rp "▶ Enter para continuar... "; echo; }
 run()     { echo "${C_CMD}\$ $*${C_RST}"; "$@"; }
+# Igual que run(), pero reintenta hasta 3 veces (la API de GitHub a veces
+# devuelve errores transitorios; que un hipo no mate la demo en vivo).
+rungh()   { echo "${C_CMD}\$ $*${C_RST}"
+            local i
+            for i in 1 2 3; do
+              "$@" && return 0
+              echo "  ⚠ intento $i falló; reintentando en $((i*10)) s..."
+              sleep $((i*10))
+            done
+            echo "  ✖ GitHub sigue fallando tras 3 intentos (¿incidente? ver githubstatus.com)"
+            return 1; }
 
 ultima_run() { gh run list -R "$REPO" --limit 1 --json databaseId --jq '.[0].databaseId // 0'; }
 
@@ -90,7 +101,7 @@ echo "nota de demo $TS" >> docs/notas.md
 run git add docs/notas.md
 run git commit -q -m "docs: nota de demo $TS"
 run git push -q -u origin "feature/demo-docs-$TS"
-run gh pr create -R "$REPO" --base develop --head "feature/demo-docs-$TS" \
+rungh gh pr create -R "$REPO" --base develop --head "feature/demo-docs-$TS" \
   --title "docs: demo $TS" --body "Prueba 1: no debería disparar ningún workflow."
 explica "Esperando 30 s para confirmar que NO se creó ninguna run..."
 sleep 30
@@ -115,7 +126,7 @@ echo "demo-$TS" > backend/version.txt
 run git add backend/version.txt
 run git commit -q -m "feat(backend): bump de demo $TS"
 run git push -q -u origin "feature/demo-backend-$TS"
-run gh pr create -R "$REPO" --base develop --head "feature/demo-backend-$TS" \
+rungh gh pr create -R "$REPO" --base develop --head "feature/demo-backend-$TS" \
   --title "feat(backend): demo $TS" --body "Prueba 2: debe correr SOLO CI Backend."
 explica "Esperando que arranque la run de CI (segunda corrida ≈ 30-40 s por la caché)..."
 RUN_ID="$(espera_nueva_run "$PREV")"
@@ -149,7 +160,7 @@ explica "Al mergearlo, el push a main dispara SOLO Deploy Backend con entorno"
 explica "prod, en el runner 'oci' de la VM. deploy-ml y deploy-full, en silencio."
 pausa
 PREV="$(ultima_run)"
-run gh pr create -R "$REPO" --base main --head develop \
+rungh gh pr create -R "$REPO" --base main --head develop \
   --title "release: demo $TS" --body "Prueba 4: al mergear debe correr SOLO Deploy Backend, en la VM."
 explica "Esperando el CI del PR de release..."
 RUN_ID="$(espera_nueva_run "$PREV")"
@@ -183,7 +194,7 @@ if [[ "${R5,,}" == "s" ]]; then
   run git add data-science/version.txt
   run git commit -q -m "feat(ml): bump de demo $TS"
   run git push -q -u origin "feature/demo-ml-$TS"
-  run gh pr create -R "$REPO" --base develop --head "feature/demo-ml-$TS" \
+  rungh gh pr create -R "$REPO" --base develop --head "feature/demo-ml-$TS" \
     --title "feat(ml): demo $TS" --body "Prueba 5: debe correr SOLO CI ML."
   RUN_ID="$(espera_nueva_run "$PREV")"
   [ -n "$RUN_ID" ] || { echo "✖ No apareció la run de CI ML"; exit 1; }
@@ -200,7 +211,7 @@ if [[ "${R5,,}" == "s" ]]; then
   fi
   pausa
   PREV="$(ultima_run)"
-  run gh pr create -R "$REPO" --base main --head develop \
+  rungh gh pr create -R "$REPO" --base main --head develop \
     --title "release: demo ml $TS" --body "Al mergear debe correr SOLO Deploy ML."
   RUN_ID="$(espera_nueva_run "$PREV")"
   if [ -n "$RUN_ID" ]; then run gh run watch -R "$REPO" "$RUN_ID" --exit-status; fi
@@ -247,7 +258,7 @@ if [[ "${R6,,}" == "s" ]]; then
   pausa
   explica "Paso C: PR develop→main... que nace en conflicto."
   PREV="$(ultima_run)"
-  run gh pr create -R "$REPO" --base main --head develop \
+  rungh gh pr create -R "$REPO" --base main --head develop \
     --title "release: demo conflicto $TS" --body "Prueba 6: PR CONFLICTING — no debe disparar CI."
   explica "Esperando 30 s..."
   sleep 30
