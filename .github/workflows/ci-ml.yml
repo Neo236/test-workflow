@@ -22,7 +22,13 @@ permissions:
 jobs:
   lint-and-test:
     runs-on: [self-hosted, ci]
-    container: python:3.10-slim
+    container:
+      image: python:3.10-slim
+      # Correr con el uid:gid del usuario del runner (1000:1000): si el
+      # contenedor corre como root, deja archivos de root en el workspace
+      # compartido y el siguiente job sin contenedor falla con EACCES al
+      # limpiarlo (descubierto en la réplica).
+      options: --user 1000:1000
     defaults:
       run:
         working-directory: data-science
