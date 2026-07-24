@@ -1,5 +1,9 @@
 # Deploy Backend — Spring Boot (Java 17)
-# Se dispara SOLO con merges a main que modifican backend/**.
+# Se dispara con merges que modifican backend/**:
+#   push a main    → despliega PRODUCCIÓN  (docker compose -p energiai-prod)
+#   push a develop → despliega STAGING     (docker compose -p energiai-staging)
+# Ambos ambientes conviven en la misma VM con proyectos compose separados,
+# puertos parametrizados y su propio .env.
 # Corre en el runner self-hosted de la VM de OCI (label: oci).
 # Nunca se dispara desde pull_request: código de PRs no se ejecuta
 # en nuestra infraestructura de producción.
@@ -7,16 +11,16 @@ name: Deploy Backend
 
 on:
   push:
-    branches: [main]
-    # Fase 2 (staging): agregar develop a la lista de branches y
-    # seleccionar el entorno según github.ref_name.
+    branches: [main, develop]
     paths:
       - "backend/**"
 
 permissions:
   contents: read
 
-# Evita dos deploys simultáneos del mismo servicio si se encadenan merges.
+# Evita dos deploys simultáneos del mismo servicio EN EL MISMO ambiente si se
+# encadenan merges (el grupo incluye la rama: staging y prod no se bloquean
+# entre sí y pueden correr a la par).
 concurrency:
   group: deploy-backend-${{ github.ref }}
   cancel-in-progress: false
@@ -24,13 +28,16 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, oci]
-    # TODO (opcional): environment: production
+    env:
+      # main → prod · develop → staging
+      DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+    # TODO (opcional): environment: production con required reviewers para prod
     steps:
       - uses: actions/checkout@v4
 
       - name: Re-desplegar backend
         run: |
-          echo "🚀 Desplegando backend | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
+          echo "🚀 Desplegando backend | entorno: $DEPLOY_ENV | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
           # TODO: bloqueado por tres pendientes del repo (validar en la VM ARM64):
           #   1. mvnw sin bit de ejecución → el RUN ./mvnw del Dockerfile falla
           #      en un clone fresco. Fix: git update-index --chmod=+x .../mvnw
@@ -39,14 +46,16 @@ jobs:
           #      Alternativa multi-arch: maven:3.9-eclipse-temurin-17 y
           #      eclipse-temurin:17-jre (base Ubuntu).
           # El comando final será:
-          #   docker compose up -d --build backend
-          echo "PLACEHOLDER: docker compose up -d --build backend"
+          #   docker compose -p energiai-$DEPLOY_ENV --env-file .env.$DEPLOY_ENV up -d --build backend
+          echo "PLACEHOLDER: docker compose -p energiai-$DEPLOY_ENV up -d --build backend"
 
       - name: Verificar salud del servicio
         run: |
           # TODO: habilitar cuando el backend exponga /actuator/health
           # (requiere spring-boot-starter-actuator en el pom.xml — al 24/07
           # sigue sin estar, aunque el HEALTHCHECK del Dockerfile ya lo consulta).
+          # El puerto sale del compose parametrizado: 8080 (prod) / 8081 (staging).
+          #   PORT=$([ "$DEPLOY_ENV" = "prod" ] && echo 8080 || echo 8081)
           #   sleep 20
-          #   curl --fail --retry 5 --retry-delay 5 http://localhost:8080/actuator/health
-          echo "PLACEHOLDER: curl http://localhost:8080/actuator/health"
+          #   curl --fail --retry 5 --retry-delay 5 http://localhost:$PORT/actuator/health
+          echo "PLACEHOLDER: curl http://localhost:<puerto-$DEPLOY_ENV>/actuator/health"
