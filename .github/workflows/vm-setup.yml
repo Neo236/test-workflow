@@ -1,0 +1,52 @@
+# Setup de la VM para CD (se lanza a mano, una sola vez).
+# Instala Docker Engine + compose plugin con el script oficial get.docker.com,
+# agrega el usuario del runner al grupo docker y programa un reinicio del
+# servicio del runner (5 s después de terminar el job) para que tome el grupo.
+# Requiere sudo sin contraseña (default en las VMs Ubuntu de OCI); si no lo
+# hay, el primer paso falla con instrucciones.
+name: Setup VM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  instalar-docker:
+    name: Instalar Docker en la VM
+    runs-on: [self-hosted, oci]
+    timeout-minutes: 15
+    steps:
+      - name: Verificar sudo sin contraseña
+        run: |
+          if ! sudo -n true 2>/dev/null; then
+            echo "::error::El usuario del runner no tiene sudo sin contraseña."
+            echo "Instalar a mano por SSH: curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker \$USER"
+            exit 1
+          fi
+          echo "✔ sudo OK"
+
+      - name: Instalar Docker (si falta)
+        run: |
+          if command -v docker >/dev/null; then
+            echo "Docker ya instalado: $(docker --version)"
+            exit 0
+          fi
+          curl -fsSL https://get.docker.com | sudo sh
+          sudo systemctl enable --now docker
+          docker --version || sudo docker --version
+
+      - name: Habilitar docker sin sudo para el runner
+        run: |
+          sudo usermod -aG docker "$USER"
+          echo "grupos de $USER: $(id -nG "$USER")"
+
+      - name: Programar reinicio del runner (toma el grupo docker)
+        run: |
+          SVC=$(ls /etc/systemd/system/ | grep '^actions.runner.*\.service$' | head -1)
+          echo "servicio: $SVC"
+          # systemd-run crea un timer transitorio: el job termina limpio y el
+          # servicio se reinicia 5 s después, ya con el grupo docker aplicado.
+          sudo systemd-run --on-active=5 systemctl restart "$SVC"
+          echo "✔ reinicio programado; verificar con una corrida de 'Inspeccion VM'"
