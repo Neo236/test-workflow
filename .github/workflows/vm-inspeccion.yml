@@ -1,0 +1,44 @@
+# Inspección de la VM (solo lectura) — gate de seguridad antes de deploys reales.
+# Se lanza a mano (workflow_dispatch) y corre en el runner self-hosted de la VM.
+# No modifica nada: solo reporta docker, puertos, recursos y rastro viejo.
+name: Inspeccion VM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspeccionar:
+    name: Inspeccionar VM (solo lectura)
+    runs-on: [self-hosted, oci]
+    timeout-minutes: 5
+    steps:
+      - name: Docker disponible y sin sudo
+        run: |
+          echo "== docker =="
+          docker --version
+          docker compose version
+          echo "== contenedores (todos) =="
+          docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+          echo "== imágenes =="
+          docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' | head -15
+
+      - name: Puertos en uso (8080/8081/8000/8001/80/443)
+        run: |
+          ss -tlnp 2>/dev/null | grep -E ':(8080|8081|8000|8001|80|443)\s' || echo "ninguno de los puertos objetivo está en uso"
+
+      - name: Recursos
+        run: |
+          echo "== disco =="; df -h / | tail -1
+          echo "== memoria =="; free -h | head -2
+          echo "== arquitectura =="; uname -m
+
+      - name: Rastro viejo del runner
+        run: |
+          echo "== _work =="
+          du -sh "$HOME"/energiai-cd/_work 2>/dev/null || echo "sin _work"
+          ls "$HOME"/energiai-cd/_work 2>/dev/null || true
+          echo "== .env de entornos =="
+          ls -la "$HOME"/energiai-envs 2>/dev/null || echo "sin ~/energiai-envs (se creará en el primer deploy)"
