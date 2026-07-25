@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy ML (${{ github.ref_name == 'main' && 'prod' || 'staging' }})
     runs-on: [self-hosted, oci]
+    timeout-minutes: 30
     env:
       DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
     steps:

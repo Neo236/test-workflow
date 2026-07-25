@@ -1,5 +1,25 @@
-# Compose de mentira, solo para la demo de paths.
-# Editar este archivo dispara el workflow "Deploy Completo".
+# Compose real (basado en el del repo oficial) parametrizado para que
+# staging y prod convivan en la misma VM:
+# - El puerto externo viene del .env del entorno (BACKEND_PORT: prod 8080,
+#   staging 8081). Solo el proxy inverso expone 80/443 al exterior.
+# - Sin container_name fijo: el nombre lo da el project de compose
+#   (-p energiai-prod / -p energiai-staging), si no los entornos chocan.
+# - Solo backend por ahora: el servicio ml vuelve cuando la rama `data`
+#   mergee su requirements.txt (hoy el build de ml-service falla).
 services:
-  demo:
-    image: alpine
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - SPRING_PROFILES_ACTIVE=prod
+    restart: unless-stopped
+    networks:
+      - energiai-network
+
+networks:
+  energiai-network:
+    driver: bridge

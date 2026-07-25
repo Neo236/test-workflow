@@ -1,9 +1,10 @@
-# Deploy Backend — Spring Boot (Java 17)
-# Se dispara con merges que modifican backend/**:
-#   push a main    → despliega PRODUCCIÓN  (docker compose -p energiai-prod)
-#   push a develop → despliega STAGING     (docker compose -p energiai-staging)
+# Deploy Backend — Spring Boot (Java 17) — DEPLOY REAL
+# Se dispara con merges que modifican backend/** (o el compose):
+#   push a main    → despliega PRODUCCIÓN  (docker compose -p energiai-prod,  puerto 8080)
+#   push a develop → despliega STAGING     (docker compose -p energiai-staging, puerto 8081)
 # Ambos ambientes conviven en la misma VM con proyectos compose separados,
-# puertos parametrizados y su propio .env.
+# puertos parametrizados por .env y redes propias. Los puertos son internos:
+# hacia afuera solo expone el proxy inverso (80/443 — ver propuesta de proxy).
 # Corre en el runner self-hosted de la VM de OCI (label: oci).
 # Nunca se dispara desde pull_request: código de PRs no se ejecuta
 # en nuestra infraestructura de producción.
@@ -14,20 +15,24 @@ on:
     branches: [main, develop]
     paths:
       - "backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-backend.yml"
 
 permissions:
   contents: read
 
 # Evita dos deploys simultáneos del mismo servicio EN EL MISMO ambiente si se
 # encadenan merges (el grupo incluye la rama: staging y prod no se bloquean
-# entre sí y pueden correr a la par).
+# entre sí y pueden correr a la par). Sin cancel: un deploy no se corta a mitad.
 concurrency:
   group: deploy-backend-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   deploy:
+    name: Deploy Backend (${{ github.ref_name == 'main' && 'prod' || 'staging' }})
     runs-on: [self-hosted, oci]
+    timeout-minutes: 30
     env:
       # main → prod · develop → staging
       DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
@@ -35,27 +40,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Re-desplegar backend
+      - name: Preparar .env del entorno
         run: |
-          echo "🚀 Desplegando backend | entorno: $DEPLOY_ENV | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
-          # TODO: bloqueado por tres pendientes del repo (validar en la VM ARM64):
-          #   1. mvnw sin bit de ejecución → el RUN ./mvnw del Dockerfile falla
-          #      en un clone fresco. Fix: git update-index --chmod=+x .../mvnw
-          #   2. maven:3.9.6-eclipse-temurin-17-alpine (builder) no publica arm64.
-          #   3. eclipse-temurin:17-jre-alpine (runtime) no publica arm64.
-          #      Alternativa multi-arch: maven:3.9-eclipse-temurin-17 y
-          #      eclipse-temurin:17-jre (base Ubuntu).
-          # El comando final será:
-          #   docker compose -p energiai-$DEPLOY_ENV --env-file .env.$DEPLOY_ENV up -d --build backend
-          echo "PLACEHOLDER: docker compose -p energiai-$DEPLOY_ENV up -d --build backend"
+          # En el repo oficial este archivo lo crea DevOps a mano en la VM
+          # (va a contener credenciales de DB/OCI y NUNCA se commitea);
+          # el workflow solo lo consume. Acá se autogenera porque el repo de
+          # práctica no maneja secretos.
+          mkdir -p "$HOME/energiai-envs"
+          ENV_FILE="$HOME/energiai-envs/.env.$DEPLOY_ENV"
+          if [ ! -f "$ENV_FILE" ]; then
+            if [ "$DEPLOY_ENV" = "prod" ]; then
+              echo "BACKEND_PORT=8080" > "$ENV_FILE"
+            else
+              echo "BACKEND_PORT=8081" > "$ENV_FILE"
+            fi
+            echo "creado $ENV_FILE"
+          fi
+          cat "$ENV_FILE"
 
-      - name: Verificar salud del servicio
+      - name: Desplegar (build + up)
         run: |
-          # TODO: habilitar cuando el backend exponga /actuator/health
-          # (requiere spring-boot-starter-actuator en el pom.xml — al 24/07
-          # sigue sin estar, aunque el HEALTHCHECK del Dockerfile ya lo consulta).
-          # El puerto sale del compose parametrizado: 8080 (prod) / 8081 (staging).
-          #   PORT=$([ "$DEPLOY_ENV" = "prod" ] && echo 8080 || echo 8081)
-          #   sleep 20
-          #   curl --fail --retry 5 --retry-delay 5 http://localhost:$PORT/actuator/health
-          echo "PLACEHOLDER: curl http://localhost:<puerto-$DEPLOY_ENV>/actuator/health"
+          echo "🚀 entorno: $DEPLOY_ENV | rama: ${{ github.ref_name }} | commit: ${{ github.sha }}"
+          docker compose -p "energiai-$DEPLOY_ENV" \
+            --env-file "$HOME/energiai-envs/.env.$DEPLOY_ENV" \
+            up -d --build backend
+
+      - name: Smoke test
+        run: |
+          . "$HOME/energiai-envs/.env.$DEPLOY_ENV"
+          echo "esperando al backend ($DEPLOY_ENV) en :$BACKEND_PORT ..."
+          for i in $(seq 1 30); do
+            if curl -sf "http://localhost:$BACKEND_PORT/v3/api-docs" > /dev/null; then
+              echo "✔ backend ($DEPLOY_ENV) responde en :$BACKEND_PORT"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "✖ el backend no respondió; últimos logs:"
+          docker compose -p "energiai-$DEPLOY_ENV" logs --tail 50 backend
+          exit 1
+          # Cuando el pom incluya spring-boot-starter-actuator, cambiar
+          # /v3/api-docs por /actuator/health (chequeo más completo).
