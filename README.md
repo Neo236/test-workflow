@@ -1,55 +1,44 @@
-# 🧪 test-workflow — Réplica del pipeline CI/CD de EnergiAI
+# test-workflow — laboratorio de CI/CD (EnergiAI)
 
-Repo de práctica de [@Neo236](https://github.com/Neo236) que replica **1:1** el pipeline
-CI/CD propuesto para [`No-Country-simulation/G9-LATAM-TEAM-09`](https://github.com/No-Country-simulation/G9-LATAM-TEAM-09)
-(propuesta "CI/CD por Sector, runners self-hosted", julio 2026). Mismos workflows,
-mismos nombres de runner, mismas etiquetas: lo único que cambia es la URL del repo
-al registrar los runners.
+Réplica funcional del pipeline CI/CD propuesto para
+[G9-LATAM-TEAM-09](https://github.com/No-Country-simulation/G9-LATAM-TEAM-09):
+**CI en runners de GitHub + CD self-hosted** con staging y producción en
+paralelo. Sirve como herramienta de demostración: todo lo que hay acá se probó
+de punta a punta contra una VM real (OCI Ampere, ARM64).
 
-## Runners (idénticos al plan oficial)
+## El modelo
 
-| Runner | Máquina | Label | Corre |
-|--------|---------|-------|-------|
-| `energiai-ci-01` | Servidor local del equipo (Debian x64) | `ci` | CI de los PRs: build + tests |
-| `energiai-oci-01` | VM OCI `energiai-app-01` (Ubuntu 24.04 ARM64) | `oci` | CD: deploys al mergear a `main` |
+| Evento | Workflow | Dónde corre | Qué hace |
+|--------|----------|-------------|----------|
+| PR / push a `develop` o `main` | `ci.yml` | GitHub (`ubuntu-latest`) | Build + tests + package del backend, validación del compose |
+| Merge a `develop` | `deploy-backend.yml` | runner self-hosted (label `oci`) | Deploy **staging** — `compose -p energiai-staging`, puerto 8081 |
+| Merge a `main` | `deploy-backend.yml` | runner self-hosted (label `oci`) | Deploy **producción** — `compose -p energiai-prod`, puerto 8080 |
+| Cambios en `data-science/**` | `deploy-ml.yml` | runner self-hosted (label `oci`) | Placeholder (se activa cuando el servicio ML tenga build) |
 
-## Workflows
+Puntos de diseño:
 
-| Evento | Workflow | Runner |
-|--------|----------|--------|
-| PR a `develop`/`main` que toca `backend/**` | `ci-backend` — **`./mvnw -B verify` real** (el backend Spring Boot es copia del repo oficial) | `ci` |
-| PR a `develop`/`main` que toca `data-science/**` | `ci-ml` (placeholders, igual que el oficial hoy) | `ci` |
-| Merge a `develop` (→ **staging**) o `main` (→ **prod**) que toca `backend/**` | `deploy-backend` | `oci` |
-| Merge a `develop`/`main` que toca `data-science/**` | `deploy-ml` | `oci` |
-| Merge a `develop`/`main` que toca `docker-compose.yml` | `deploy-full` | `oci` |
-| Solo `docs/**` / `README.md` | ninguno | — |
+- Los deploys disparan **solo con `push`** (merge) — un PR jamás ejecuta código
+  en la infraestructura.
+- Staging y prod conviven en la misma VM: proyectos compose separados, cada uno
+  con su `.env` (en `~/energiai-envs/` de la VM, nunca en el repo).
+- Filtros de `paths`: cada sector despliega solo cuando cambia su carpeta.
+- `backend/Dockerfile` usa imágenes **multi-arch** (las variantes alpine de
+  maven/temurin no publican ARM64) y no tiene healthcheck de actuator (el pom
+  no lo incluye); el smoke test del deploy pega a `/v3/api-docs`.
 
-Los `deploy-*` mantienen los pasos placeholder del template oficial (los comandos
-`docker compose` reales quedan bloqueados por pendientes del repo oficial,
-documentados en la propuesta de CI/CD).
+## Workflows utilitarios (workflow_dispatch)
 
-## Flujo de ramas
+- `vm-inspeccion.yml` — radiografía de solo lectura de la VM: docker, puertos,
+  recursos, rastros.
+- `vm-setup.yml` — instala Docker + compose plugin y habilita el runner para
+  usarlos (idempotente).
+- `vm-limpieza.yml` — baja los despliegues de prueba y desmantela el runner de
+  la VM (autodesmantelamiento programado con systemd-run).
 
-`feature/*` → PR → `develop` (→ despliega **staging**) → PR → `main` (→ despliega
-**producción**). Los deploys nunca se disparan desde PRs: código de PRs jamás corre
-en el runner de la VM. Ambos ambientes conviven en la VM como proyectos compose
-separados (`energiai-staging` / `energiai-prod`), cada uno con su `.env` y puertos.
+## Estado actual
 
-## Demo guiada paso a paso
-
-`demo/demo-pipeline.sh` recorre cada propiedad del pipeline pausando con **Enter**
-entre pruebas (pensado para mostrarlo en vivo): filtros de `paths`, CI real en el
-runner `ci`, integración a `develop` sin deploy, deploy selectivo en el runner
-`oci` de la VM, carril propio de ML (opcional) y el gotcha de PRs con conflicto
-(opcional). Requiere `gh` autenticado con push al repo:
-
-```bash
-bash demo/demo-pipeline.sh
-```
-
-## Diferencias deliberadas con el oficial
-
-- El backend acá está commiteado con `mvnw` **con** bit de ejecución (el fix
-  definitivo); el workflow conserva el `chmod +x` defensivo del template.
-- Sin revisión de PR obligatoria (repo de una sola persona); el oficial exige
-  1 aprobación.
+**Sin runners registrados.** El CI hosted funciona siempre; los `deploy-*` y
+utilitarios quedan a la espera de un runner con label `oci`. Para re-armar el
+laboratorio: registrar un runner self-hosted en una VM con Docker
+(Settings → Actions → Runners), correr `Setup VM` si falta Docker, y mergear
+cualquier cambio de `backend/**` a `develop` o `main`.

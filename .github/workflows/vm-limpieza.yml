@@ -1,0 +1,69 @@
+# Limpieza final de la VM (se lanza a mano) — deja la VM lista para el runner
+# del repo oficial:
+# 1. Baja y elimina los despliegues de prueba (staging y prod) con sus imágenes.
+# 2. Borra los .env de prueba.
+# 3. Deja en ~/ el script de registro del runner oficial (setup-runner-oficial.sh).
+# 4. Se autodesmantela: programa (systemd-run) la baja del servicio del runner
+#    de este repo y el borrado de ~/energiai-cd, 30 s después de terminar.
+# Tras correrlo, eliminar también el runner del repo en GitHub (API o Settings).
+name: Limpieza VM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  limpiar:
+    name: Limpiar VM y preparar para el repo oficial
+    runs-on: [self-hosted, oci]
+    timeout-minutes: 10
+    steps:
+      - name: Bajar despliegues de prueba
+        run: |
+          for ENV in staging prod; do
+            docker compose -p "energiai-$ENV" down --rmi local --volumes --remove-orphans 2>/dev/null || true
+          done
+          rm -rf "$HOME/energiai-envs"
+          echo "== estado final =="
+          docker ps -a
+          docker images
+
+      - name: Dejar script de registro del runner oficial
+        run: |
+          cat > "$HOME/setup-runner-oficial.sh" << 'SCRIPT'
+          #!/usr/bin/env bash
+          # Registra el runner de CD de EnergiAI en el repo oficial y lo deja
+          # como servicio systemd. La VM ya tiene Docker + Compose instalados.
+          # Uso: ./setup-runner-oficial.sh <TOKEN>
+          #   TOKEN: en el repo oficial → Settings > Actions > Runners >
+          #          New self-hosted runner (Linux ARM64). Expira en 1 hora.
+          set -euo pipefail
+          REPO_URL="https://github.com/No-Country-simulation/G9-LATAM-TEAM-09"
+          RUNNER_DIR="$HOME/energiai-runner"
+          RUNNER_NAME="energiai-oci-01"
+          RUNNER_LABELS="oci"
+          TOKEN="${1:?Falta el token de registro}"
+
+          mkdir -p "$RUNNER_DIR" && cd "$RUNNER_DIR"
+          if [ ! -f config.sh ]; then
+            VER=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+            curl -fsSL -o runner.tar.gz "https://github.com/actions/runner/releases/download/v${VER}/actions-runner-linux-arm64-${VER}.tar.gz"
+            tar xzf runner.tar.gz && rm runner.tar.gz
+            sudo ./bin/installdependencies.sh
+          fi
+          ./config.sh --url "$REPO_URL" --token "$TOKEN" --name "$RUNNER_NAME" --labels "$RUNNER_LABELS" --unattended
+          sudo ./svc.sh install
+          sudo ./svc.sh start
+          sudo ./svc.sh status
+          SCRIPT
+          chmod +x "$HOME/setup-runner-oficial.sh"
+          echo "✔ listo: ~/setup-runner-oficial.sh"
+
+      - name: Programar autodesmantelamiento del runner de prueba
+        run: |
+          SVC=$(ls /etc/systemd/system/ | grep '^actions.runner.*\.service$' | head -1)
+          echo "servicio a bajar: $SVC"
+          sudo systemd-run --on-active=30 /bin/bash -c "systemctl stop $SVC; systemctl disable $SVC; rm -f /etc/systemd/system/$SVC; systemctl daemon-reload; rm -rf /home/ubuntu/energiai-cd"
+          echo "✔ en 30 s la VM queda sin el runner de prueba"
